@@ -4,6 +4,7 @@ import { HttpError } from '../errors.js';
 import { SeedQuerySchema, type SeedQuery } from '../matches/match.schema.js';
 import { simulate } from '../matches/simulator.js';
 import { parseId } from '../middlewares/params.js';
+import { requireAuth } from '../middlewares/requireAuth.js';
 import { validate, validateQuery } from '../middlewares/validate.js';
 import { teams } from './team.repository.js';
 import { TeamPatchSchema, TeamQuerySchema, TeamSchema, type TeamInput, type TeamQuery } from './team.schema.js';
@@ -41,20 +42,20 @@ teamRouter.get('/:id/versus/:opponentId', validateQuery(SeedQuerySchema), async 
 });
 
 // POST /api/teams
-teamRouter.post('/', validate(TeamSchema), async (req, res) => {
+teamRouter.post('/', requireAuth, validate(TeamSchema), async (req, res) => {
   const team = await teams.insert(req.body as TeamInput);
   res.status(201).location(`/api/teams/${team.id}`).json(team);
 });
 
 // PATCH /api/teams/:id
-teamRouter.patch('/:id', validate(TeamPatchSchema), async (req, res) => {
+teamRouter.patch('/:id', requireAuth, validate(TeamPatchSchema), async (req, res) => {
   const team = await teams.update(parseId(req.params.id, 'Team'), req.body as Partial<TeamInput>);
   if (!team) throw new HttpError(404, 'Team not found');
   res.json(team);
 });
 
 // DELETE /api/teams/:id (ses joueurs deviennent agents libres : ON DELETE SET NULL)
-teamRouter.delete('/:id', async (req, res) => {
+teamRouter.delete('/:id', requireAuth, async (req, res) => {
   const deleted = await teams.delete(parseId(req.params.id, 'Team'));
   if (!deleted) throw new HttpError(404, 'Team not found');
   res.sendStatus(204);

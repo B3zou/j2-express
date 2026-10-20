@@ -3,6 +3,7 @@
 import { Router } from 'express';
 import { HttpError } from '../errors.js';
 import { parseId } from '../middlewares/params.js';
+import { requireAuth } from '../middlewares/requireAuth.js';
 import { validate, validateQuery } from '../middlewares/validate.js';
 import { games } from './game.repository.js';
 import { GamePatchSchema, GameQuerySchema, GameSchema, type GameInput, type GameQuery } from './game.schema.js';
@@ -23,20 +24,20 @@ gameRouter.get('/:id', async (req, res) => {
 });
 
 // POST /api/games                       hier : GameController::create()
-gameRouter.post('/', validate(GameSchema), async (req, res) => {
+gameRouter.post('/', requireAuth, validate(GameSchema), async (req, res) => {
   const game = await games.insert(req.body as GameInput);
   res.status(201).location(`/api/games/${game.id}`).json(game);
 });
 
 // PATCH /api/games/:id                  hier : GameController::update()
-gameRouter.patch('/:id', validate(GamePatchSchema), async (req, res) => {
+gameRouter.patch('/:id', requireAuth, validate(GamePatchSchema), async (req, res) => {
   const game = await games.update(parseId(req.params.id, 'Game'), req.body as Partial<GameInput>);
   if (!game) throw new HttpError(404, 'Game not found');
   res.json(game);
 });
 
 // DELETE /api/games/:id                 hier : GameController::delete()
-gameRouter.delete('/:id', async (req, res) => {
+gameRouter.delete('/:id', requireAuth, async (req, res) => {
   const deleted = await games.delete(parseId(req.params.id, 'Game'));
   if (!deleted) throw new HttpError(404, 'Game not found');
   res.sendStatus(204);
