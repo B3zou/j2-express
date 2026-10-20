@@ -5,17 +5,15 @@ import { requireAuth } from '../middlewares/requireAuth.js';
 import { validate } from '../middlewares/validate.js';
 import { hashPassword } from './auth.service.js';
 import { users } from './user.repository.js';
-import { LoginSchema, RegisterSchema, type Credentials } from './user.schema.js';
+import { LoginSchema, RegisterSchema, toPublic, type Credentials } from './user.schema.js';
 
 export const authRouter = Router();
 
-// POST /api/auth/register { email, password } → 201 l'utilisateur créé
-// TODO 1 (TD JWT, étape 1) : sur le chemin de register (ce handler + hashPassword dans auth.service.ts), il y a
-// DEUX défauts. Trouvez-les : l'un se voit dans Swagger, l'autre avec make db-shell.
+// POST /api/auth/register { email, password } → 201 l'utilisateur créé (sans son mot de passe)
 authRouter.post('/register', validate(RegisterSchema), async (req, res) => {
   const { email, password } = req.body as Credentials;
   const user = await users.insert({ email, password: await hashPassword(password) });
-  res.status(201).json(user);
+  res.status(201).json(toPublic(user));
 });
 
 // POST /api/auth/login { email, password } → 200 { accessToken, tokenType: 'Bearer', expiresIn }
