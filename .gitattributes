@@ -1,0 +1,7 @@
+# Fins de ligne Unix partout (indispensable pour les scripts exécutés dans Docker, y compris sous Windows)
+* text=auto eol=lf
+*.sh text eol=lf
+Makefile text eol=lf
+*.png binary
+*.jpg binary
+*.woff2 binary

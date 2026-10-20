@@ -1,0 +1,31 @@
+# Rapports de tests (make report)
+/reports/*
+!/reports/.gitkeep
+
+# Surcharges locales (ports, nom de projet Compose)
+/.env
+
+# Notes de l'enseignant (jamais chez les étudiants)
+/TEACHER.md
+/teacher/
+
+# Les deux TD sont distribués au format Word par l'enseignant, pas via le dépôt
+/docs/td-jwt.md
+/docs/td-redis.md
+
+# Node
+api/node_modules/
+api/dist/
+npm-debug.log*
+
+# Éditeurs et systèmes
+.idea/
+.vscode/
+.DS_Store
+__pycache__/
+
+# Espace de travail des agents
+/.superpowers/
+
+# Prisma (branche demo-prisma) : le client est généré par « prisma generate », jamais versionné
+api/src/generated/

@@ -1,0 +1,845 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# GG League API — spécification OpenAPI 3.1, écrite à la main (conception d'abord).
+# Servie sur /api/openapi.json et affichée par Swagger UI sur /api/docs.
+# J2 : toutes les routes sont décrites, dont /api/auth/*. Les écritures exigent un jeton (cadenas dans Swagger UI :
+# bouton « Authorize », collez le accessToken renvoyé par /api/auth/login, sans le mot « Bearer »).
+# ─────────────────────────────────────────────────────────────────────────────
+openapi: 3.1.0
+info:
+  title: GG League API
+  version: 1.0.0
+  description: |
+    L'API REST de la GG League, une ligue e-sport fictive. Jeux, équipes, joueurs, matchs.
+    Les lectures sont publiques ; les écritures exigent un jeton JWT (`Authorization: Bearer …`)
+    obtenu par `POST /api/auth/login`.
+servers:
+  - url: http://localhost:8000
+tags:
+  - name: Auth
+    description: S'inscrire, se connecter, savoir qui je suis
+  - name: Games
+    description: Les jeux de la ligue (exemple fourni)
+  - name: Teams
+    description: Les équipes et leurs joueurs
+  - name: Players
+    description: Les joueurs, avec ou sans équipe
+  - name: Matches
+    description: Les matchs programmés et joués
+
+paths:
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Créer un compte
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credentials' }
+      responses:
+        '201':
+          description: Compte créé (jamais le mot de passe dans la réponse)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Se connecter et obtenir un jeton
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credentials' }
+      responses:
+        '200':
+          description: "Le jeton d'accès, à envoyer ensuite dans l'en-tête Authorization: Bearer <accessToken>"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tokens' }
+        '401':
+          description: Email inconnu ou mot de passe faux (la réponse ne dit pas lequel)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: L'utilisateur connecté (d'après son jeton)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: L'utilisateur du jeton
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthUser' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/games:
+    get:
+      tags: [Games]
+      summary: Liste des jeux
+      parameters:
+        - name: genre
+          in: query
+          description: Ne garder que les jeux de ce genre
+          schema: { $ref: '#/components/schemas/Genre' }
+      responses:
+        '200':
+          description: Les jeux, triés par nom
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Game' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    post:
+      tags: [Games]
+      summary: Créer un jeu
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GameInput' }
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '201':
+          description: Jeu créé
+          headers:
+            Location:
+              description: L'URL du nouveau jeu
+              schema: { type: string, example: /api/games/6 }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Game' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/games/{id}:
+    parameters:
+      - $ref: '#/components/parameters/id'
+    get:
+      tags: [Games]
+      summary: Un jeu
+      responses:
+        '200':
+          description: Le jeu demandé
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Game' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Games]
+      summary: Modifier un jeu (seuls les champs envoyés changent)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GamePatch' }
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '200':
+          description: Le jeu modifié
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Game' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Games]
+      summary: Supprimer un jeu
+      security:
+        - bearerAuth: []
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '204':
+          description: Jeu supprimé
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/teams:
+    get:
+      tags: [Teams]
+      summary: Liste des équipes
+      parameters:
+        - name: country
+          in: query
+          description: Ne garder que les équipes de ce pays (code à deux lettres, majuscules ou minuscules)
+          schema: { type: string, pattern: '^[A-Za-z]{2}$', example: FR }
+      responses:
+        '200':
+          description: Les équipes, triées par nom (sans leurs joueurs)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TeamSummary' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    post:
+      tags: [Teams]
+      summary: Créer une équipe
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TeamInput' }
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '201':
+          description: Équipe créée
+          headers:
+            Location:
+              schema: { type: string, example: /api/teams/9 }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TeamSummary' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/teams/{id}:
+    parameters:
+      - $ref: '#/components/parameters/id'
+    get:
+      tags: [Teams]
+      summary: Une équipe et ses joueurs
+      responses:
+        '200':
+          description: L'équipe demandée, avec ses joueurs triés par pseudo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Team' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Teams]
+      summary: Modifier une équipe
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TeamPatch' }
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '200':
+          description: L'équipe modifiée
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TeamSummary' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Teams]
+      summary: Supprimer une équipe (ses joueurs deviennent agents libres, ses matchs disparaissent)
+      security:
+        - bearerAuth: []
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '204':
+          description: Équipe supprimée
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/teams/{id}/versus/{opponentId}:
+    parameters:
+      - $ref: '#/components/parameters/id'
+      - name: opponentId
+        in: path
+        required: true
+        description: L'identifiant de l'équipe adverse
+        schema: { type: integer, minimum: 1 }
+      - $ref: '#/components/parameters/seed'
+    get:
+      tags: [Teams]
+      summary: Simuler un match (rien n'est enregistré)
+      responses:
+        '200':
+          description: Le résultat simulé, au meilleur des 5 manches
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MatchResult' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Même équipe des deux côtés, ou équipe sans joueur
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/players:
+    get:
+      tags: [Players]
+      summary: Rechercher des joueurs (paginé)
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: limit
+          in: query
+          description: Nombre de joueurs par page
+          schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+        - name: country
+          in: query
+          schema: { type: string, pattern: '^[A-Za-z]{2}$' }
+        - name: teamId
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: q
+          in: query
+          description: Une partie du pseudo, sans tenir compte de la casse
+          schema: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: Une page de joueurs, triés par pseudo
+          headers:
+            X-Total-Count:
+              description: Le nombre total de joueurs correspondant aux filtres
+              schema: { type: integer, example: 26 }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Player' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    post:
+      tags: [Players]
+      summary: Créer un joueur
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlayerInput' }
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '201':
+          description: Joueur créé
+          headers:
+            Location:
+              schema: { type: string, example: /api/players/27 }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Player' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/players/top:
+    get:
+      tags: [Players]
+      summary: Le classement des joueurs
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+        - name: country
+          in: query
+          schema: { type: string, pattern: '^[A-Za-z]{2}$' }
+      responses:
+        '200':
+          description: Les meilleurs joueurs, du plus fort au moins fort
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Player' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/players/{id}:
+    parameters:
+      - $ref: '#/components/parameters/id'
+    get:
+      tags: [Players]
+      summary: Un joueur
+      responses:
+        '200':
+          description: Le joueur demandé
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Player' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Players]
+      summary: Modifier un joueur (teamId null = quitter son équipe)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlayerPatch' }
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '200':
+          description: Le joueur modifié
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Player' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Players]
+      summary: Supprimer un joueur
+      security:
+        - bearerAuth: []
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '204':
+          description: Joueur supprimé
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/matches:
+    get:
+      tags: [Matches]
+      summary: Liste des matchs
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [scheduled, played] }
+      responses:
+        '200':
+          description: Les matchs, du plus ancien au plus récent
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Match' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    post:
+      tags: [Matches]
+      summary: Programmer un match entre deux équipes
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MatchInput' }
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '201':
+          description: Match programmé
+          headers:
+            Location:
+              schema: { type: string, example: /api/matches/7 }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Match' }
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          description: Équipes identiques, ou équipe inexistante
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/matches/{id}:
+    parameters:
+      - $ref: '#/components/parameters/id'
+    get:
+      tags: [Matches]
+      summary: Un match
+      responses:
+        '200':
+          description: Le match demandé
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Match' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Matches]
+      summary: Supprimer un match
+      security:
+        - bearerAuth: []
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '204':
+          description: Match supprimé
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/matches/{id}/play:
+    parameters:
+      - $ref: '#/components/parameters/id'
+      - $ref: '#/components/parameters/seed'
+    post:
+      tags: [Matches]
+      summary: Jouer le match et enregistrer le résultat
+      security:
+        - bearerAuth: []
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '200':
+          description: Le match joué (score, gagnant, date)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Match' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Le match a déjà été joué
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Une des équipes n'a aucun joueur
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Le accessToken renvoyé par POST /api/auth/login
+
+  parameters:
+    id:
+      name: id
+      in: path
+      required: true
+      description: L'identifiant de la ressource
+      schema: { type: integer, minimum: 1 }
+    seed:
+      name: seed
+      in: query
+      required: false
+      description: Une graine pour un tirage reproductible
+      schema: { type: integer, example: 42 }
+
+  schemas:
+    # ── Auth ──
+    Credentials:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, maxLength: 255, example: coach@gg-league.dev }
+        password: { type: string, format: password, minLength: 8, maxLength: 72, example: coach123 }
+    User:
+      type: object
+      required: [id, email, createdAt]
+      properties:
+        id: { type: integer, readOnly: true, example: 1 }
+        email: { type: string, format: email, example: coach@gg-league.dev }
+        createdAt: { type: string, format: date-time }
+    AuthUser:
+      type: object
+      required: [id, email]
+      properties:
+        id: { type: integer, example: 1 }
+        email: { type: string, format: email, example: coach@gg-league.dev }
+    Tokens:
+      type: object
+      required: [accessToken, tokenType, expiresIn]
+      properties:
+        accessToken: { type: string, description: Un JWT signé par l'API }
+        tokenType: { type: string, enum: [Bearer] }
+        expiresIn: { type: integer, description: Durée de validité en secondes, example: 3600 }
+
+    Genre:
+      type: string
+      enum: [moba, fps, fighting, sports, racing, strategy]
+
+    # Ce que l'API renvoie
+    Game:
+      type: object
+      required: [id, name, genre, teamSize]
+      properties:
+        id: { type: integer, readOnly: true, example: 1 }
+        name: { type: string, minLength: 1, maxLength: 100, example: Rocket League }
+        genre: { $ref: '#/components/schemas/Genre' }
+        teamSize: { type: integer, minimum: 1, maximum: 10, example: 3 }
+
+    # Ce que le client envoie (POST) : les mêmes propriétés, sans id
+    GameInput:
+      type: object
+      required: [name, genre, teamSize]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100, example: Rocket League }
+        genre: { $ref: '#/components/schemas/Genre' }
+        teamSize: { type: integer, minimum: 1, maximum: 10, example: 3 }
+
+    # PATCH : tout est facultatif
+    GamePatch:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        genre: { $ref: '#/components/schemas/Genre' }
+        teamSize: { type: integer, minimum: 1, maximum: 10 }
+
+
+    Country:
+      type: string
+      description: Code pays ISO 3166-1 alpha-2, en majuscules
+      pattern: '^[A-Z]{2}$'
+      example: FR
+
+    # ── Team ──
+    TeamSummary:
+      type: object
+      required: [id, name, tag, country]
+      properties:
+        id: { type: integer, readOnly: true, example: 1 }
+        name: { type: string, minLength: 2, maxLength: 50, example: Null Pointers }
+        tag: { type: string, pattern: '^[A-Z0-9]{2,5}$', example: NUL }
+        country: { $ref: '#/components/schemas/Country' }
+    Team:
+      type: object
+      required: [id, name, tag, country, players]
+      properties:
+        id: { type: integer, readOnly: true, example: 1 }
+        name: { type: string, minLength: 2, maxLength: 50, example: Null Pointers }
+        tag: { type: string, pattern: '^[A-Z0-9]{2,5}$', example: NUL }
+        country: { $ref: '#/components/schemas/Country' }
+        players:
+          type: array
+          description: Les joueurs de l'équipe, triés par pseudo
+          items: { $ref: '#/components/schemas/PlayerSummary' }
+    TeamInput:
+      type: object
+      required: [name, tag, country]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 50, example: Null Pointers }
+        tag: { type: string, pattern: '^[A-Z0-9]{2,5}$', example: NUL }
+        country: { $ref: '#/components/schemas/Country' }
+    TeamPatch:
+      type: object
+      properties:
+        name: { type: string, minLength: 2, maxLength: 50 }
+        tag: { type: string, pattern: '^[A-Z0-9]{2,5}$' }
+        country: { $ref: '#/components/schemas/Country' }
+
+    # ── Player ──
+    PlayerSummary:
+      type: object
+      required: [id, nickname, role, rating]
+      properties:
+        id: { type: integer, example: 1 }
+        nickname: { type: string, example: Zer0Day }
+        role: { type: [string, 'null'], example: striker }
+        rating: { type: integer, example: 2450 }
+    Player:
+      type: object
+      required: [id, nickname, country, role, rating, team]
+      properties:
+        id: { type: integer, readOnly: true, example: 1 }
+        nickname: { type: string, minLength: 2, maxLength: 30, example: Zer0Day }
+        country: { $ref: '#/components/schemas/Country' }
+        role: { type: [string, 'null'], maxLength: 30, example: striker }
+        rating: { type: integer, minimum: 0, maximum: 3000, example: 2450 }
+        team:
+          description: L'équipe du joueur, ou null pour un agent libre
+          oneOf:
+            - type: object
+              required: [id, name, tag]
+              properties:
+                id: { type: integer, example: 1 }
+                name: { type: string, example: Null Pointers }
+                tag: { type: string, example: NUL }
+            - type: 'null'
+    PlayerInput:
+      type: object
+      required: [nickname, country]
+      properties:
+        nickname: { type: string, minLength: 2, maxLength: 30, example: Zer0Day }
+        country: { $ref: '#/components/schemas/Country' }
+        role: { type: [string, 'null'], maxLength: 30, example: striker }
+        rating: { type: integer, minimum: 0, maximum: 3000, default: 1000 }
+        birthDate:
+          type: [string, 'null']
+          format: date
+          description: Donnée personnelle, jamais renvoyée ; le joueur doit avoir au moins 13 ans
+          example: '2002-04-12'
+        teamId: { type: [integer, 'null'], minimum: 1, description: null = agent libre }
+    PlayerPatch:
+      type: object
+      properties:
+        nickname: { type: string, minLength: 2, maxLength: 30 }
+        country: { $ref: '#/components/schemas/Country' }
+        role: { type: [string, 'null'], maxLength: 30 }
+        rating: { type: integer, minimum: 0, maximum: 3000 }
+        birthDate: { type: [string, 'null'], format: date }
+        teamId: { type: [integer, 'null'], minimum: 1 }
+
+    # ── Match ──
+    MatchTeam:
+      type: object
+      required: [id, name, tag]
+      properties:
+        id: { type: integer, example: 1 }
+        name: { type: string, example: Null Pointers }
+        tag: { type: string, example: NUL }
+    Match:
+      type: object
+      required: [id, status, teamA, teamB, score, winner, playedAt]
+      properties:
+        id: { type: integer, readOnly: true, example: 7 }
+        status: { type: string, enum: [scheduled, played] }
+        teamA: { $ref: '#/components/schemas/MatchTeam' }
+        teamB: { $ref: '#/components/schemas/MatchTeam' }
+        score:
+          type: [array, 'null']
+          description: '[manches gagnées par A, par B] ; null tant que le match n''est pas joué'
+          items: { type: integer, minimum: 0, maximum: 3 }
+          minItems: 2
+          maxItems: 2
+          example: [3, 1]
+        winner: { type: [string, 'null'], description: Le tag de l'équipe gagnante, example: NUL }
+        playedAt: { type: [string, 'null'], format: date-time }
+    MatchInput:
+      type: object
+      required: [teamAId, teamBId]
+      properties:
+        teamAId: { type: integer, minimum: 1, example: 1 }
+        teamBId: { type: integer, minimum: 1, example: 2 }
+    MatchResult:
+      type: object
+      description: Un match simulé (GET …/versus/…), rien n'est enregistré
+      required: [teamA, teamB, score, winner, rounds]
+      properties:
+        teamA: { $ref: '#/components/schemas/MatchSide' }
+        teamB: { $ref: '#/components/schemas/MatchSide' }
+        score:
+          type: array
+          items: { type: integer }
+          minItems: 2
+          maxItems: 2
+          example: [3, 1]
+        winner: { type: string, example: NUL }
+        rounds:
+          type: array
+          description: Le tag du gagnant de chaque manche
+          items: { type: string }
+          example: [NUL, NUL, KPN, NUL]
+    MatchSide:
+      type: object
+      required: [id, name, tag, rating]
+      properties:
+        id: { type: integer, example: 1 }
+        name: { type: string, example: Null Pointers }
+        tag: { type: string, example: NUL }
+        rating: { type: integer, description: Le niveau moyen de l'équipe, example: 2347 }
+
+    # Le format de toutes les erreurs (inspiré de la RFC 9457, « problem details »)
+    Error:
+      type: object
+      required: [title, status]
+      properties:
+        title: { type: string, example: Validation Failed }
+        status: { type: integer, example: 422 }
+        errors:
+          type: array
+          description: Présent pour les erreurs 400, 409 et 422, un élément par champ en cause
+          items:
+            type: object
+            required: [path, message]
+            properties:
+              path: { type: string, example: teamSize }
+              message: { type: string, example: 'Too big: expected number to be <=10' }
+
+  responses:
+    BadRequest:
+      description: Requête illisible (JSON cassé) ou paramètre de requête invalide
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: La ressource n'existe pas
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Une valeur unique est déjà prise (nom, tag, pseudo…)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    UnsupportedMediaType:
+      description: Le corps n'est pas annoncé comme application/json
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Jeton absent, invalide ou expiré (en-tête WWW-Authenticate Bearer)
+      headers:
+        WWW-Authenticate:
+          schema: { type: string, example: Bearer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ValidationError:
+      description: Le corps est lisible mais ne respecte pas les règles
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }

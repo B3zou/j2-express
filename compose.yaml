@@ -1,0 +1,107 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# GG League · J2 — environnement de la journée (Docker Compose v2)
+# Ne lancez pas ces commandes à la main : utilisez le Makefile (make help).
+#
+#   api       Node.js 22 + Express 5 (votre API, en TypeScript)   http://localhost:8000
+#   database  PostgreSQL 17                                       localhost:5433 (depuis votre poste)
+#   redis     Redis 8 (le cache de l'après-midi)                   localhost:6379 (depuis votre poste)
+#   api-test  copie de l'API sur la base « app_test », pour make test
+#   hurl      l'outil qui exécute les tests, lancé à la demande
+# ─────────────────────────────────────────────────────────────────────────────
+name: gg-league-j2
+
+x-api: &api
+  build:
+    context: ./api
+  image: ${API_IMAGE:-gg-league-j2-api:dev}
+  # Le conteneur tourne avec VOTRE identifiant : les fichiers qu'il crée (node_modules…) vous appartiennent.
+  user: "${UID:-1000}:${GID:-1000}"
+  depends_on:
+    database:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  volumes:
+    - ./api:/app
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+    interval: 3s
+    timeout: 5s
+    retries: 60
+    start_period: 20s
+
+services:
+  database:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    healthcheck:
+      test: ["CMD", "pg_isready", "-d", "app", "-U", "app"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - database_data:/var/lib/postgresql/data
+    ports:
+      # Accès depuis votre poste (DBeaver, DataGrip...) : localhost:5433, utilisateur app / mot de passe app
+      - "${DB_PORT:-5433}:5432"
+
+  redis:
+    image: redis:8-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    ports:
+      # Accès depuis votre poste (RedisInsight, redis-cli) : localhost:6379
+      - "${REDIS_PORT:-6379}:6379"
+
+  api:
+    <<: *api
+    environment:
+      PORT: 3000
+      API_PORT: ${API_PORT:-8000}
+      DATABASE_URL: postgres://app:app@database:5432/app
+      # Base Redis 0 pour le développement (api-test utilise la base 1)
+      REDIS_URL: redis://redis:6379/0
+      # Le secret qui signe les JWT : en production, une longue valeur aléatoire, jamais dans le dépôt
+      JWT_SECRET: dev-secret-change-me
+      # Toujours avec une unité (1h, 15m, 7d) : une variable d'environnement est une chaîne, et "3600" sans unité vaut 3600 ms pour jsonwebtoken
+      JWT_EXPIRES_IN: 1h
+    ports:
+      - "${API_PORT:-8000}:3000"
+    tty: true
+
+  api-test:
+    <<: *api
+    profiles: ["test"]
+    command: ["npm", "run", "start"]
+    environment:
+      PORT: 3000
+      INSTALL_DEPS: "0"
+      DATABASE_URL: postgres://app:app@database:5432/app_test
+      REDIS_URL: redis://redis:6379/1
+      # Les tests embarquent des jetons pré-signés avec ce secret (tests/12-protected.hurl)
+      JWT_SECRET: test-secret
+      JWT_EXPIRES_IN: 1h
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+  hurl:
+    image: ghcr.io/orange-opensource/hurl:8.0.1
+    profiles: ["tools"]
+    working_dir: /tests
+    volumes:
+      - ./tests:/tests:ro
+      - ./reports:/reports
+
+volumes:
+  database_data:

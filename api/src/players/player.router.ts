@@ -1,0 +1,49 @@
+// Les routes de Player. Hier : PlayerController + le DTO PlayerInput.
+import { Router } from 'express';
+import { HttpError } from '../errors.js';
+import { parseId } from '../middlewares/params.js';
+import { validate, validateQuery } from '../middlewares/validate.js';
+import { players } from './player.repository.js';
+import { PlayerPatchSchema, PlayerSchema, PlayerSearchSchema, TopQuerySchema, type PlayerInput, type PlayerSearch, type TopQuery } from './player.schema.js';
+
+export const playerRouter = Router();
+
+// GET /api/players?page=&limit=&country=&teamId=&q= : une page, le total dans un en-tête
+playerRouter.get('/', validateQuery(PlayerSearchSchema), async (_req, res) => {
+  const { items, total } = await players.search(res.locals.query as PlayerSearch);
+  res.set('X-Total-Count', String(total)).json(items);
+});
+
+// GET /api/players/top?limit=3&country=IS — déclarée AVANT /:id, sinon « top » est pris pour un id
+// TODO 20 (TD Redis, étape 1) : un cache à la main, ici même, avant de le généraliser (étape 2).
+playerRouter.get('/top', validateQuery(TopQuerySchema), async (_req, res) => {
+  res.json(await players.findTop(res.locals.query as TopQuery));
+});
+
+// GET /api/players/:id
+playerRouter.get('/:id', async (req, res) => {
+  const player = await players.findView(parseId(req.params.id, 'Player'));
+  if (!player) throw new HttpError(404, 'Player not found');
+  res.json(player);
+});
+
+// POST /api/players : on insère la ligne, puis on relit la vue (avec l'équipe imbriquée)
+playerRouter.post('/', validate(PlayerSchema), async (req, res) => {
+  const { id } = await players.insert(req.body as PlayerInput);
+  res.status(201).location(`/api/players/${id}`).json(await players.findView(id));
+});
+
+// PATCH /api/players/:id
+playerRouter.patch('/:id', validate(PlayerPatchSchema), async (req, res) => {
+  const id = parseId(req.params.id, 'Player');
+  const updated = await players.update(id, req.body as Partial<PlayerInput>);
+  if (!updated) throw new HttpError(404, 'Player not found');
+  res.json(await players.findView(id));
+});
+
+// DELETE /api/players/:id
+playerRouter.delete('/:id', async (req, res) => {
+  const deleted = await players.delete(parseId(req.params.id, 'Player'));
+  if (!deleted) throw new HttpError(404, 'Player not found');
+  res.sendStatus(204);
+});
