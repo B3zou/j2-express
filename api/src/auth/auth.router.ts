@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { HttpError } from '../errors.js';
 import { requireAuth } from '../middlewares/requireAuth.js';
 import { validate } from '../middlewares/validate.js';
-import { hashPassword, signAccessToken, verifyPassword } from './auth.service.js';
+import { hashPassword, signAccessToken, verifyPassword, type AuthUser } from './auth.service.js';
 import { users } from './user.repository.js';
 import { LoginSchema, RegisterSchema, toPublic, type Credentials } from './user.schema.js';
 
@@ -26,7 +26,6 @@ authRouter.post('/login', validate(LoginSchema), async (req, res) => {
 });
 
 // GET /api/auth/me (protégée) → 200 { id, email } : l'utilisateur du jeton
-// TODO 5 (TD JWT, étape 3) : renvoyer res.locals.user, déposé par requireAuth.
-authRouter.get('/me', requireAuth, async (_req, _res) => {
-  throw new HttpError(501, 'Not Implemented');
+authRouter.get('/me', requireAuth, async (_req, res) => {
+  res.json(res.locals.user as AuthUser);
 });
