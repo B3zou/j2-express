@@ -45,7 +45,7 @@ authRouter.post('/refresh', validate(RefreshSchema), async (req, res) => {
 // POST /api/auth/logout { refreshToken } → 204 : le refresh token est révoqué (le jeton d'accès, lui, expire seul)
 authRouter.post('/logout', validate(RefreshSchema), async (req, res) => {
   const { refreshToken } = req.body as RefreshInput;
-  await refreshTokens.consume(hashRefreshToken(refreshToken));
+  await refreshTokens.revoke(hashRefreshToken(refreshToken));
   res.sendStatus(204);
 });
 
