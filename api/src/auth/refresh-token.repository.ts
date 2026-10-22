@@ -19,4 +19,11 @@ export const refreshTokens = {
     );
     return row?.userId ?? null;
   },
+
+  async revoke(hash: string): Promise<boolean | null>
+    const [row] = await query<{ userId: number }>(
+      `DELETE FROM refresh_token WHERE token_hash = $1 AND expires_at > now() RETURNING user_id AS "userId"`,
+      [hash],
+    );
+    const row?.userId === null ? false : true;
 };
